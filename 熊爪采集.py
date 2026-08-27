@@ -159,12 +159,64 @@ def load_cookie(platform):
 
 
 # ---------- 采集核心（完全自研实现） ----------
-async def collect_xhs(keyword, limit, save):
+# ---------- 平台注册表（架构扩展位：新增平台只需在此登记） ----------
+PLATFORM_CONFIG = {
+    "xhs": {
+        "name": "小红书", "status": "ready",
+        "search_url": "https://www.xiaohongshu.com/search_result?keyword={kw}&source=web_search_result_notes",
+        "login_wall": ".login-container, .login-modal",
+        "card": "section.note-item",
+        "link": "a.cover",
+        "title": ".title",
+        "author": ".author-wrapper .name, .author .name",
+        "likes": ".like-wrapper .count, .like .count",
+        "collects": ".collect-wrapper .count, .collect .count",
+        "detail_url": "https://www.xiaohongshu.com/explore/{id}",
+        "login_hint": "首次运行会弹出浏览器，请用【小号】扫码登录",
+    },
+    "douyin": {
+        "name": "抖音", "status": "beta",
+        "search_url": "https://www.douyin.com/search/{kw}",
+        "login_wall": ".login-container, #login-panel",
+        "card": "ul[data-e2e=scroll-list] li[data-e2e=search-card]",
+        "link": "a[data-e2e=search-card-cover]",
+        "title": "a[data-e2e=search-card-title]",
+        "author": ".author-name, .account-name",
+        "likes": ".count",
+        "collects": "",
+        "detail_url": "https://www.douyin.com/video/{id}",
+        "login_hint": "抖音网页版需登录后可见搜索结果，请先启动浏览器登录小号",
+    },
+    "weibo": {
+        "name": "微博", "status": "beta",
+        "search_url": "https://s.weibo.com/weibo?q={kw}",
+        "login_wall": ".login-panel, .W_login",
+        "card": "div.card-wrap",
+        "link": "a[href*=detail]",
+        "title": "p.txt, h2.weibo-text",
+        "author": "a.name",
+        "likes": ".card-act .woo-like-count, .woo-like-count",
+        "collects": "",
+        "detail_url": "",
+        "login_hint": "微博搜索页部分数据可见，完整采集需登录",
+    },
+}
+
+
+async def collect_platform(platform, keyword, limit, save):
     from playwright.async_api import async_playwright
+    from urllib.parse import quote
+
+    cfg = PLATFORM_CONFIG.get(platform)
+    if not cfg:
+        print(f"[!] 暂不支持的平台: {platform}")
+        return 0
+    if cfg["status"] != "ready":
+        print(f"[i] 提示：{cfg['name']} 为内测版，选择器基于公开页面结构编写，待真实账号验证")
 
     limit = min(limit, MAX_LIMIT)
     conn = init_db()
-    state = load_cookie("xhs")
+    state = load_cookie(platform)
 
     async with async_playwright() as p:
         browser, is_cdp = await connect_browser(p, headless=False)
@@ -182,52 +234,65 @@ async def collect_xhs(keyword, limit, save):
         page = await context.new_page()
 
         # 打开搜索页
-        url = f"https://www.xiaohongshu.com/search_result?keyword={keyword}&source=web_search_result_notes"
-        print(f"[1/4] 打开搜索页：{keyword}")
+        url = cfg["search_url"].format(kw=quote(keyword))
+        print(f"[1/4] {cfg['name']} 打开搜索页：{keyword}")
         await page.goto(url, wait_until="domcontentloaded", timeout=60000)
         await page.wait_for_timeout(3000)
 
         # 未登录则提示扫码并等待
-        need_login = await page.locator(".login-container, .login-modal").count() > 0
+        login_wall_sel = cfg["login_wall"]
+        need_login = await page.locator(login_wall_sel).count() > 0
         if need_login and not state:
-            print("[!] 检测到登录墙：请在浏览器中扫码登录（请使用小号）")
+            print(f"[!] 检测到登录墙：{cfg['login_hint']}")
             print("[!] 登录完成后将自动继续采集…")
-            while await page.locator(".login-container, .login-modal").count() > 0:
+            while await page.locator(login_wall_sel).count() > 0:
                 await page.wait_for_timeout(2000)
             await page.wait_for_timeout(2000)
-            # 缓存登录态
-            save_cookie(await context.storage_state(), "xhs")
+            save_cookie(await context.storage_state(), platform)
 
         # 滚动加载更多
         print(f"[2/4] 滚动加载内容…")
         items = []
         seen = set()
         no_new_rounds = 0
+        card_sel = cfg["card"]
 
         while len(items) < limit:
-            # 提取当前页所有笔记卡片（平台页面真实 DOM，自研选择器）
-            cards = await page.locator("section.note-item").count()
+            cards = await page.locator(card_sel).count()
             for i in range(cards):
-                card = page.locator("section.note-item").nth(i)
+                card = page.locator(card_sel).nth(i)
                 try:
-                    link = await card.locator("a.cover").get_attribute("href")
-                    note_id = link.split("/")[-1] if link else ""
-                    if note_id in seen or not note_id:
+                    link = await card.locator(cfg["link"]).first.get_attribute("href") if cfg["link"] else ""
+                    note_id = ""
+                    if link:
+                        parts = [s for s in link.split("/") if s]
+                        note_id = parts[-1].split("?")[0] if parts else ""
+                    if not note_id or note_id in seen:
                         continue
-                    title = await card.locator(".title").inner_text()
-                    author = await card.locator(".author-wrapper .name, .author .name").first.inner_text()
-                    likes = await card.locator(".like-wrapper .count, .like .count").first.inner_text()
-                    collects = await card.locator(".collect-wrapper .count, .collect .count").first.inner_text()
+                    title = (await card.locator(cfg["title"]).first.inner_text()).strip()
+                    author = ""
+                    if cfg["author"]:
+                        try:
+                            author = (await card.locator(cfg["author"]).first.inner_text()).strip()
+                        except Exception:
+                            author = ""
+                    likes_txt = ""
+                    if cfg["likes"]:
+                        try:
+                            likes_txt = (await card.locator(cfg["likes"]).first.inner_text()).strip()
+                        except Exception:
+                            likes_txt = ""
+                    detail_url = cfg["detail_url"].format(id=note_id) if cfg["detail_url"] else f"{url}"
                     items.append({
                         "id": note_id,
-                        "title": title.strip(),
-                        "author": author.strip(),
-                        "likes": parse_count(likes),
-                        "collects": parse_count(collects),
-                        "url": f"https://www.xiaohongshu.com/explore/{note_id}",
+                        "title": title,
+                        "author": author,
+                        "likes": parse_count(likes_txt),
+                        "collects": 0,
+                        "url": detail_url,
                     })
                     seen.add(note_id)
-                    print(f"  [{len(items)}/{limit}] {title[:30]}… | {author} | 👍{likes}")
+                    print(f"  [{len(items)}/{limit}] {title[:30]}… | {author} | 👍{likes_txt}")
                 except Exception:
                     continue
                 if len(items) >= limit:
@@ -236,12 +301,10 @@ async def collect_xhs(keyword, limit, save):
             if len(items) >= limit:
                 break
 
-            # 滚动到底部触发加载
             before = len(seen)
             await page.evaluate("window.scrollBy(0, document.body.scrollHeight)")
             await page.wait_for_timeout(random.uniform(MIN_DELAY, MAX_DELAY) * 1000)
-            after = len(seen)
-            if after == before:
+            if len(seen) == before:
                 no_new_rounds += 1
                 if no_new_rounds >= 3:
                     print("[i] 已无更多内容")
@@ -260,12 +323,11 @@ async def collect_xhs(keyword, limit, save):
     conn.close()
     print(f"[3/4] 已写入数据库：{DB_PATH}")
 
-    saved = None
     if save in ("csv", "both"):
         saved = save_to_csv(items, keyword)
         print(f"[4/4] 已导出 CSV：{saved}")
     if save == "json":
-        saved = os.path.join(DATA_DIR, f"xhs_{keyword}_{time.strftime('%Y%m%d_%H%M%S')}.json")
+        saved = os.path.join(DATA_DIR, f"{platform}_{keyword}_{time.strftime('%Y%m%d_%H%M%S')}.json")
         with open(saved, "w", encoding="utf-8") as f:
             json.dump(items, f, ensure_ascii=False, indent=2)
         print(f"[4/4] 已导出 JSON：{saved}")
@@ -274,9 +336,11 @@ async def collect_xhs(keyword, limit, save):
 
 
 # ---------- 自检模式（headless 快速验证环境与链路） ----------
-async def selftest(keyword="测试"):
+async def selftest(keyword="测试", platform="xhs"):
     from playwright.async_api import async_playwright
+    from urllib.parse import quote
 
+    cfg = PLATFORM_CONFIG.get(platform, PLATFORM_CONFIG["xhs"])
     print("[自检] 开始…")
     print(f"[自检] 数据目录: {DATA_DIR}（{'可写' if os.access(DATA_DIR, os.W_OK) else '不可写'}）")
 
@@ -290,14 +354,14 @@ async def selftest(keyword="测试"):
         else:
             context = await browser.new_context(viewport={"width": 1280, "height": 900}, locale="zh-CN")
         page = await context.new_page()
-        url = f"https://www.xiaohongshu.com/search_result?keyword={keyword}&source=web_search_result_notes"
+        url = cfg["search_url"].format(kw=quote(keyword))
         print(f"[自检] 打开搜索页: {url[:60]}…")
         await page.goto(url, wait_until="domcontentloaded", timeout=45000)
         await page.wait_for_timeout(4000)
 
         title = await page.title()
-        login_wall = await page.locator(".login-container, .login-modal").count()
-        note_count = await page.locator("section.note-item").count()
+        login_wall = await page.locator(cfg["login_wall"]).count()
+        note_count = await page.locator(cfg["card"]).count()
         print(f"[自检] 页面标题: {title[:50]}")
         print(f"[自检] 登录墙: {'是（需要扫码）' if login_wall > 0 else '否'}")
         print(f"[自检] 笔记卡片数: {note_count}")
@@ -314,12 +378,12 @@ def main():
     parser.add_argument("--keyword", default="", help="搜索关键词")
     parser.add_argument("--limit", type=int, default=20, help=f"采集条数（上限 {MAX_LIMIT}）")
     parser.add_argument("--save", choices=["db", "csv", "json", "both"], default="both", help="保存方式")
-    parser.add_argument("--platform", default="xhs", choices=["xhs"], help="平台（当前仅支持 xhs）")
+    parser.add_argument("--platform", default="xhs", choices=list(PLATFORM_CONFIG.keys()), help="平台选择")
     parser.add_argument("--selftest", action="store_true", help="自检模式：headless 验证环境与链路")
     args = parser.parse_args()
 
     if args.selftest:
-        return asyncio.run(selftest(args.keyword or "测试"))
+        return asyncio.run(selftest(args.keyword or "测试", args.platform))
 
     if not args.keyword:
         print("请指定关键词：--keyword 儿童玩具")
@@ -332,11 +396,7 @@ def main():
     print("  警告: 请使用【小号】操作，控制采集节奏")
     print("=" * 50)
 
-    if args.platform == "xhs":
-        count = asyncio.run(collect_xhs(args.keyword, args.limit, args.save))
-    else:
-        print("[!] 暂不支持的平台")
-        return 1
+    count = asyncio.run(collect_platform(args.platform, args.keyword, args.limit, args.save))
 
     print(f"\n完成：共采集 {count} 条，数据位于 data/ 目录")
     return 0
