@@ -105,6 +105,15 @@ def init_db():
     return conn
 
 
+def fetch_existing_ids(conn, keyword):
+    """查询某关键词已采集的 id（用于增量去重）"""
+    try:
+        rows = conn.execute("SELECT id FROM notes WHERE keyword=?", (keyword,)).fetchall()
+        return set(r[0] for r in rows)
+    except Exception:
+        return set()
+
+
 def save_to_db(conn, items, keyword):
     now = datetime.now().isoformat(timespec="seconds")
     for it in items:
@@ -275,7 +284,7 @@ PLATFORM_CONFIG = {
 }
 
 
-async def collect_platform(platform, keyword, limit, save, wordcloud=False):
+async def collect_platform(platform, keyword, limit, save, wordcloud=False, skip_existing=True):
     from playwright.async_api import async_playwright
     from urllib.parse import quote
 
@@ -289,6 +298,10 @@ async def collect_platform(platform, keyword, limit, save, wordcloud=False):
     limit = min(limit, MAX_LIMIT)
     conn = init_db()
     state = load_cookie(platform)
+
+    existing = fetch_existing_ids(conn, keyword) if skip_existing else set()
+    if existing:
+        print(f"[i] 增量模式：该关键词已采集 {len(existing)} 条，将自动跳过重复内容")
 
     async with async_playwright() as p:
         browser, is_cdp = await connect_browser(p, headless=False)
@@ -343,7 +356,7 @@ async def collect_platform(platform, keyword, limit, save, wordcloud=False):
                         else:
                             parts = [s for s in link.split("/") if s]
                             note_id = parts[-1].split("?")[0] if parts else ""
-                    if not note_id or note_id in seen:
+                    if not note_id or note_id in seen or note_id in existing:
                         continue
                     title = (await card.locator(cfg["title"]).first.inner_text()).strip()
                     author = ""
@@ -463,6 +476,7 @@ def main():
     parser.add_argument("--platform", default="xhs", choices=list(PLATFORM_CONFIG.keys()), help="平台选择")
     parser.add_argument("--selftest", action="store_true", help="自检模式：headless 验证环境与链路")
     parser.add_argument("--wordcloud", action="store_true", help="采集完成后生成标题词云图")
+    parser.add_argument("--skip-existing", action="store_true", default=True, help="增量去重：跳过已采集过的内容（默认开启）")
     args = parser.parse_args()
 
     if args.selftest:
@@ -479,7 +493,7 @@ def main():
     print("  警告: 请使用【小号】操作，控制采集节奏")
     print("=" * 50)
 
-    count = asyncio.run(collect_platform(args.platform, args.keyword, args.limit, args.save, args.wordcloud))
+    count = asyncio.run(collect_platform(args.platform, args.keyword, args.limit, args.save, args.wordcloud, args.skip_existing))
 
     print(f"\n完成：共采集 {count} 条，数据位于 data/ 目录")
     return 0
