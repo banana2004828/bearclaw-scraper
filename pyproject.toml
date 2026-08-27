@@ -16,7 +16,7 @@ dependencies = [
 ]
 
 [project.scripts]
-bearclaw = "bearclaw:main_entry"
+bearclaw = "熊爪采集:main"
 
 [tool.setuptools]
 py-modules = ["熊爪采集"]

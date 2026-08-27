@@ -200,6 +200,32 @@ PLATFORM_CONFIG = {
         "detail_url": "",
         "login_hint": "微博搜索页部分数据可见，完整采集需登录",
     },
+    "bilibili": {
+        "name": "B站", "status": "ready",
+        "search_url": "https://search.bilibili.com/all?keyword={kw}",
+        "login_wall": "",
+        "card": ".bili-video-card",
+        "link": "a[href*=BV]",
+        "title": ".bili-video-card__info--tit",
+        "author": ".bili-video-card__info--author",
+        "likes": ".bili-video-card__stats--item",
+        "collects": "",
+        "detail_url": "https://www.bilibili.com/video/{id}",
+        "login_hint": "B站搜索页免登录，直接可见结果",
+    },
+    "kuaishou": {
+        "name": "快手", "status": "beta",
+        "search_url": "https://www.kuaishou.com/search/video?searchKey={kw}",
+        "login_wall": ".login-modal, .login-panel",
+        "card": ".video-card",
+        "link": "a[href*=short-video]",
+        "title": ".video-card-title, .title",
+        "author": ".video-card-name, .name",
+        "likes": ".video-card-views, .watch-count",
+        "collects": "",
+        "detail_url": "",
+        "login_hint": "快手网页版搜索需登录，请先启动浏览器登录小号",
+    },
 }
 
 
@@ -241,7 +267,7 @@ async def collect_platform(platform, keyword, limit, save):
 
         # 未登录则提示扫码并等待
         login_wall_sel = cfg["login_wall"]
-        need_login = await page.locator(login_wall_sel).count() > 0
+        need_login = bool(login_wall_sel) and await page.locator(login_wall_sel).count() > 0
         if need_login and not state:
             print(f"[!] 检测到登录墙：{cfg['login_hint']}")
             print("[!] 登录完成后将自动继续采集…")
@@ -360,7 +386,7 @@ async def selftest(keyword="测试", platform="xhs"):
         await page.wait_for_timeout(4000)
 
         title = await page.title()
-        login_wall = await page.locator(cfg["login_wall"]).count()
+        login_wall = await page.locator(cfg["login_wall"]).count() if cfg["login_wall"] else 0
         note_count = await page.locator(cfg["card"]).count()
         print(f"[自检] 页面标题: {title[:50]}")
         print(f"[自检] 登录墙: {'是（需要扫码）' if login_wall > 0 else '否'}")
