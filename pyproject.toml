@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "bearclaw-scraper"
+version = "0.1.0"
+description = "熊爪采集器：自研浏览器自动化公开数据采集工具（Clean-room 实现，无第三方爬虫框架源码）"
+readme = "使用说明.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "小熊工具箱" }]
+keywords = ["scraper", "xiaohongshu", "playwright", "自动化采集"]
+dependencies = [
+    "playwright>=1.61.0",
+]
+
+[project.scripts]
+bearclaw = "bearclaw:main_entry"
+
+[tool.setuptools]
+py-modules = ["熊爪采集"]

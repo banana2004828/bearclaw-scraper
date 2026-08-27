@@ -1,0 +1,23 @@
+# 数据与运行产物
+data/
+*.db
+*.csv
+*.jsonl
+
+# 登录态与浏览器缓存（含敏感信息，严禁提交）
+cookie.json
+.chrome-profile/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+build/
+dist/
+*.egg-info/
+
+# 本地服务日志
+.service_logs/
+
+# 测试残留
+.wheels/
