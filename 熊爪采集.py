@@ -125,6 +125,50 @@ def save_to_csv(items, keyword, platform="xhs"):
     return fname
 
 
+def save_to_excel(items, keyword, platform="xhs"):
+    """导出 Excel（xlsx）"""
+    from openpyxl import Workbook
+    os.makedirs(DATA_DIR, exist_ok=True)
+    fname = os.path.join(DATA_DIR, f"{platform}_{keyword}_{time.strftime('%Y%m%d_%H%M%S')}.xlsx")
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "采集数据"
+    ws.append(["ID", "标题", "作者", "点赞", "收藏", "链接"])
+    for it in items:
+        ws.append([it["id"], it["title"], it["author"], it["likes"], it["collects"], it["url"]])
+    wb.save(fname)
+    return fname
+
+
+def gen_wordcloud(items, keyword, platform="xhs"):
+    """生成标题词云图（PNG）"""
+    import jieba
+    from wordcloud import WordCloud
+    import matplotlib
+    matplotlib.use("Agg")
+
+    # 中文字体探测
+    font_candidates = [
+        r"C://Windows//Fonts//msyh.ttc", r"C://Windows//Fonts//msyh.ttf",
+        r"C://Windows//Fonts//simhei.ttf", r"C://Windows//Fonts//simsun.ttc",
+    ]
+    font_path = next((f for f in font_candidates if os.path.exists(f)), None)
+
+    texts = " ".join(it["title"] for it in items)
+    words = " ".join(jieba.cut(texts)) if texts else "暂无数据"
+    wc = WordCloud(
+        font_path=font_path,
+        width=800, height=400,
+        background_color="white",
+        max_words=100,
+        collocations=False,
+    )
+    img = wc.generate(words)
+    fname = os.path.join(DATA_DIR, f"{platform}_{keyword}_{time.strftime('%Y%m%d_%H%M%S')}_词云.png")
+    img.to_file(fname)
+    return fname
+
+
 def parse_count(text):
     """解析平台展示的 '1.2万' / '345' 形式的计数"""
     if not text:
@@ -231,7 +275,7 @@ PLATFORM_CONFIG = {
 }
 
 
-async def collect_platform(platform, keyword, limit, save):
+async def collect_platform(platform, keyword, limit, save, wordcloud=False):
     from playwright.async_api import async_playwright
     from urllib.parse import quote
 
@@ -363,6 +407,12 @@ async def collect_platform(platform, keyword, limit, save):
         with open(saved, "w", encoding="utf-8") as f:
             json.dump(items, f, ensure_ascii=False, indent=2)
         print(f"[4/4] 已导出 JSON：{saved}")
+    if save in ("excel", "both"):
+        saved = save_to_excel(items, keyword, platform)
+        print(f"[4/4] 已导出 Excel：{saved}")
+    if wordcloud:
+        saved = gen_wordcloud(items, keyword, platform)
+        print(f"[4/4] 已生成词云：{saved}")
 
     return len(items)
 
@@ -409,9 +459,10 @@ def main():
     parser = argparse.ArgumentParser(description="熊爪采集器 - 自研浏览器自动化采集")
     parser.add_argument("--keyword", default="", help="搜索关键词")
     parser.add_argument("--limit", type=int, default=20, help=f"采集条数（上限 {MAX_LIMIT}）")
-    parser.add_argument("--save", choices=["db", "csv", "json", "both"], default="both", help="保存方式")
+    parser.add_argument("--save", choices=["db", "csv", "json", "excel", "both"], default="both", help="保存方式（both=CSV+Excel）")
     parser.add_argument("--platform", default="xhs", choices=list(PLATFORM_CONFIG.keys()), help="平台选择")
     parser.add_argument("--selftest", action="store_true", help="自检模式：headless 验证环境与链路")
+    parser.add_argument("--wordcloud", action="store_true", help="采集完成后生成标题词云图")
     args = parser.parse_args()
 
     if args.selftest:
@@ -428,7 +479,7 @@ def main():
     print("  警告: 请使用【小号】操作，控制采集节奏")
     print("=" * 50)
 
-    count = asyncio.run(collect_platform(args.platform, args.keyword, args.limit, args.save))
+    count = asyncio.run(collect_platform(args.platform, args.keyword, args.limit, args.save, args.wordcloud))
 
     print(f"\n完成：共采集 {count} 条，数据位于 data/ 目录")
     return 0

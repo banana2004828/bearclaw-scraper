@@ -13,6 +13,10 @@ authors = [{ name = "小熊工具箱" }]
 keywords = ["scraper", "xiaohongshu", "playwright", "自动化采集"]
 dependencies = [
     "playwright>=1.61.0",
+    "openpyxl>=3.1.2",
+    "jieba>=0.42.1",
+    "wordcloud>=1.9.6",
+    "matplotlib>=3.11.0",
 ]
 
 [project.scripts]
