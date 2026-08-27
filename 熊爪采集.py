@@ -114,9 +114,9 @@ def save_to_db(conn, items, keyword):
     conn.commit()
 
 
-def save_to_csv(items, keyword):
+def save_to_csv(items, keyword, platform="xhs"):
     os.makedirs(DATA_DIR, exist_ok=True)
-    fname = os.path.join(DATA_DIR, f"xhs_{keyword}_{time.strftime('%Y%m%d_%H%M%S')}.csv")
+    fname = os.path.join(DATA_DIR, f"{platform}_{keyword}_{time.strftime('%Y%m%d_%H%M%S')}.csv")
     with open(fname, "w", newline="", encoding="utf-8-sig") as f:
         w = csv.DictWriter(f, fieldnames=["id", "title", "author", "likes", "collects", "url"])
         w.writeheader()
@@ -350,7 +350,7 @@ async def collect_platform(platform, keyword, limit, save):
     print(f"[3/4] 已写入数据库：{DB_PATH}")
 
     if save in ("csv", "both"):
-        saved = save_to_csv(items, keyword)
+        saved = save_to_csv(items, keyword, platform)
         print(f"[4/4] 已导出 CSV：{saved}")
     if save == "json":
         saved = os.path.join(DATA_DIR, f"{platform}_{keyword}_{time.strftime('%Y%m%d_%H%M%S')}.json")
