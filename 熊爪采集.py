@@ -14,6 +14,7 @@
 """
 import argparse
 import asyncio
+import re
 import csv
 import json
 import os
@@ -210,6 +211,7 @@ PLATFORM_CONFIG = {
         "author": ".bili-video-card__info--author",
         "likes": ".bili-video-card__stats--item",
         "collects": "",
+        "id_regex": "BV[0-9A-Za-z]{10}",
         "detail_url": "https://www.bilibili.com/video/{id}",
         "login_hint": "B站搜索页免登录，直接可见结果",
     },
@@ -291,8 +293,12 @@ async def collect_platform(platform, keyword, limit, save):
                     link = await card.locator(cfg["link"]).first.get_attribute("href") if cfg["link"] else ""
                     note_id = ""
                     if link:
-                        parts = [s for s in link.split("/") if s]
-                        note_id = parts[-1].split("?")[0] if parts else ""
+                        if cfg.get("id_regex"):
+                            m = re.search(cfg["id_regex"], link)
+                            note_id = m.group(0) if m else ""
+                        else:
+                            parts = [s for s in link.split("/") if s]
+                            note_id = parts[-1].split("?")[0] if parts else ""
                     if not note_id or note_id in seen:
                         continue
                     title = (await card.locator(cfg["title"]).first.inner_text()).strip()
